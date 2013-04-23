@@ -14,23 +14,23 @@ ARGV << '--help' if ARGV.empty?
 options = {schema: 'schema.js', verbose: false, compress: false}
 OptionParser.new do |opts|
   opts.banner = "Usage: flatten.rb [options]"
- 
+
   opts.on("-i", "--input FILE", "input filename") do |v|
     options[:input] = v
   end
- 
+
   opts.on("-o", "--output FILE", "output filename") do |v|
     options[:output] = v
   end
- 
+
   opts.on("-s", "--schema FILE", "schema file (default: schema.js)") do |v|
     options[:schema] = v
   end
- 
+
   opts.on("-c", "--[no-]compress", "compress output") do |v|
     options[:compress] = v
   end
- 
+
   opts.on("-v", "--verbose", "verbose log (default: false)") do |v|
     options[:verbose] = v
   end
@@ -51,7 +51,7 @@ def flatmap(h, e, prefix = '')
           v = v.split.join(' ')
           v = v[0,10000] + ' ...' if v.size > 10000
         end
- 
+
         h[prefix+k] = v
       end
     end
@@ -63,7 +63,7 @@ def save(row, event, opt)
   flatmap({}, event).each do |k,v|
     v = (Time.parse(v).utc.strftime('%Y-%m-%d %T') rescue '') if k =~ /_at$/
     v.clean! if v.is_a? String
-    
+
     if row.include?(k)
       row[k] = v
     else
