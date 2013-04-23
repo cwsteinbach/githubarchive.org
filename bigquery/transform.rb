@@ -1,5 +1,5 @@
 # encoding: UTF-8
-
+ 
 require 'optparse'
 require 'time'
 require 'zlib'
@@ -11,26 +11,26 @@ require 'remap.rb'
 
 ARGV << '--help' if ARGV.empty?
 
-options = {schema: 'schema.js', verbose: false, compress: true}
+options = {schema: 'schema.js', verbose: false, compress: false}
 OptionParser.new do |opts|
   opts.banner = "Usage: flatten.rb [options]"
-
+ 
   opts.on("-i", "--input FILE", "input filename") do |v|
     options[:input] = v
   end
-
+ 
   opts.on("-o", "--output FILE", "output filename") do |v|
     options[:output] = v
   end
-
+ 
   opts.on("-s", "--schema FILE", "schema file (default: schema.js)") do |v|
     options[:schema] = v
   end
-
+ 
   opts.on("-c", "--[no-]compress", "compress output") do |v|
     options[:compress] = v
   end
-
+ 
   opts.on("-v", "--verbose", "verbose log (default: false)") do |v|
     options[:verbose] = v
   end
@@ -51,7 +51,7 @@ def flatmap(h, e, prefix = '')
           v = v.split.join(' ')
           v = v[0,10000] + ' ...' if v.size > 10000
         end
-
+ 
         h[prefix+k] = v
       end
     end
@@ -63,7 +63,7 @@ def save(row, event, opt)
   flatmap({}, event).each do |k,v|
     v = (Time.parse(v).utc.strftime('%Y-%m-%d %T') rescue '') if k =~ /_at$/
     v.clean! if v.is_a? String
-
+    
     if row.include?(k)
       row[k] = v
     else
@@ -88,48 +88,54 @@ begin
 
   out = File.new(options[:output], "w")
   out = Zlib::GzipWriter.new(out) if options[:compress]
-  js  = Zlib::GzipReader.new(open(options[:input])).read
+
   cnt = 0
 
-  Yajl::Parser.parse(js) do |event|
-    r = CSV::Row.new(headers, [])
+  Zlib::GzipReader.new(open(options[:input])).each_line { |line|
+    begin
+      Yajl::Parser.parse("#{line}") do |event|
 
-    case event['type']
-    when 'PushEvent'
-      num = event['payload'].delete 'size'
-      commits = event['payload'].delete 'shas'
-      commits ||= []
+        r = CSV::Row.new(headers, [])
 
-      commits.each do |commit|
-        id, email, msg, name, flag = *commit
-        event['payload'].merge!({
-          'commit' => {
-            'id' => id, 'email' => email, 'msg' => msg,
-            'name' => name, 'flag' => flag
-          }
-        })
+        case event['type']
+        when 'PushEvent'
+          num = event['payload'].delete 'size'
+          commits = event['payload'].delete 'shas'
+          commits ||= []
 
-        save(r, event, options)
+          commits.each do |commit|
+            id, email, msg, name, flag = *commit
+            event['payload'].merge!({
+              'commit' => {
+                'id' => id, 'email' => email, 'msg' => msg,
+                'name' => name, 'flag' => flag
+              }
+            })
+
+            save(r, event, options)
+          end
+        when 'GollumEvent'
+          pages = event['payload'].delete 'pages'
+          pages ||= []
+
+          pages.each do |page|
+            page['summary'] = page['summary'] if page['summary']
+            event['payload'].merge!({'page' => page})
+            save(r, event, options)
+          end
+        else
+          save(r, event, options)
+        end
+
+        raise "Record <> schema mismatch: #{r.size}, #{schema.size}. Exiting." if r.size != schema.size
+
+        cnt += 1
+        out.write r.to_s			
       end
-    when 'GollumEvent'
-      pages = event['payload'].delete 'pages'
-      pages ||= []
-
-      pages.each do |page|
-        page['summary'] = page['summary'] if page['summary']
-        event['payload'].merge!({'page' => page})
-        save(r, event, options)
-      end
-    else
-      save(r, event, options)
+    rescue
+      next
     end
-
-    raise "Record <> schema mismatch: #{r.size}, #{schema.size}. Exiting." if r.size != schema.size
-
-    cnt += 1
-    out.write r.to_s
-  end
-
+  }
   puts "Processed #{options[:input]}: #{cnt} rows in #{(Time.now - start).round} seconds"
 ensure
   out.close
